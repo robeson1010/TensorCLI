@@ -1,10 +1,11 @@
 # TensorCLI 需求文档
 
-版本：0.2（草案）
+版本：0.3（草案）
 状态：规划中，功能待开发
 
 修订记录：
 
+- 0.3：TensorWriting 新增运行时位置文件 `runtime-location.json`（T-01，已实现），W-07 改为优先读取该文件；新增第 8 节"对 TensorWriting 的改动"，写明编译共享包的抽取方案（T-02）。
 - 0.2：技术栈定为 TypeScript（Node 22+）；补充 TensorWriting 编译接口的调研结论；新增 `tensor writing compile` 需求（W-07 到 W-13），并把它放到第一个里程碑。
 - 0.1：初稿。
 
@@ -23,7 +24,7 @@ Tensor 系列桌面软件（TensorReading、TensorWriting）目前只能通过�
 
 - 不替代桌面应用的图形界面。
 - 不提供云端服务或远程访问。
-- 不直接写入应用的数据库或存储目录（例外见第 8 节待决问题 2：TeX 资源缓存）。
+- 不直接写入应用的数据库或存储目录（例外见第 9 节待决问题 2：TeX 资源缓存）。
 
 ## 2. 用户与场景
 
@@ -58,6 +59,7 @@ TensorWriting 是本地 LaTeX 编辑器（Tauri：React 前端 + Rust 后端）�
 - 没有本地 HTTP API，只有 deep link 和单实例插件。CLI 不能请求正在运行的 App 编译。
 - 项目文件可以直接读取。App 的项目级数据放在项目内的 `.tensorwriting/` 目录，例如 `.tensorwriting/preview/preview.pdf`（最近一次预览，附带 `preview.json` 记录主文件）、`.tensorwriting/texmf`（项目本地宏包）。
 - 用户级偏好（每个项目选定的主文件、引擎等）在 `%APPDATA%\com.tensorwriting.desktop\project-preferences.json`。
+- 运行时位置文件（T-01，TensorWriting 0.1.8 之后的版本提供）：`%APPDATA%\com.tensorwriting.desktop\runtime-location.json`，格式见 8.1。
 
 **编译链路**
 
@@ -118,7 +120,7 @@ tensor writing runtime
 
 | ID | 优先级 | 需求 |
 |---|---|---|
-| W-07 | P0 | `runtime`：定位 TensorWriting 已安装的 TeX 运行时（环境变量 `TENSOR_WRITING_RUNTIME` > 正式版目录 > 开发版目录），读取 `active.json`，校验兼容标识与清单 SHA-256；输出路径、版本、variant（minimal/full）、缓存大小。未安装时提示在 TensorWriting 中安装，退出码 3 |
+| W-07 | P0 | `runtime`：定位 TensorWriting 已安装的 TeX 运行时（环境变量 `TENSOR_WRITING_RUNTIME` > `runtime-location.json`（见 8.1）> 旧版 App 的默认目录：正式版 `%LOCALAPPDATA%\TensorWriting\texlive`、开发版 `%APPDATA%\com.tensorwriting.desktop\texlive`），读取 `active.json`，校验兼容标识、`layoutVersion` 与清单 SHA-256；输出路径、版本、variant（minimal/full）、缓存大小。未安装时提示在 TensorWriting 中安装，退出码 3 |
 | W-08 | P0 | `compile`：在 Node 中直接运行运行时内的 BusyTeX 编译项目，不依赖浏览器，也不要求 App 运行。项目扫描、主文件与引擎检测与 App 规则一致（见 3.2）；`--main`、`--engine` 可覆盖，默认沿用 App 中该项目的偏好 |
 | W-09 | P0 | 输出：PDF 默认写到主文件同目录同名 `.pdf`，`-o` 可指定。`--json` 返回 `{success, pdf, engine, mode, passes, elapsedMs, diagnostics[], downloads[]}`；诊断格式与 App 诊断面板一致（文件、行、列、级别、消息）。编译失败退出码 6 |
 | W-10 | P0 | 按需补包：实现 3.2 所述流程（202、下载、校验、重编）。下载来源和校验方式与 App 相同；下载进度输出到 stderr，`--json` 结果列出本次下载的文件或宏包。`--offline` 只用缓存，不发起网络请求 |
@@ -191,9 +193,102 @@ tensor writing runtime
 | M4 | 完成 A-02、A-03、A-04；在至少一个 MCP 客户端和一个编码 Agent 中完成"修改 LaTeX、编译、读诊断"和"检索文献、插入引文"的端到端演示 |
 | M5 | 完成 W-01 到 W-05、W-12；发布到 npm，提供 Release 与安装文档 |
 
-## 8. 待决问题
+## 8. 对 TensorWriting 的改动
 
-1. **编译代码复用与许可证**：TensorWriting（AGPL-3.0）中的编译纯函数（`compile.ts`、`busytexModes.ts`、`engineRequirements.ts`）如何供 CLI（MIT）复用。倾向于抽成 App 与 CLI 共同依赖的共享包（需先去掉对 i18n 的依赖），许可证待定。运行时中的 BusyTeX 文件由 CLI 在运行时从用户安装目录加载，不随 CLI 分发。
+CLI 的编译功能不要求 App 修改即可工作，但为了不依赖 App 的内部细节，App 侧需配合以下改动。编号 T-xx。
+
+| ID | 内容 | 状态 |
+|---|---|---|
+| T-01 | App 写出运行时位置文件 `runtime-location.json` | 已实现（TensorWriting 工作区，未提交；随 0.1.8 之后的版本发布） |
+| T-02 | 编译相关纯函数抽成 App 与 CLI 共用的共享包 | 方案已定，待实施 |
+
+### 8.1 T-01 运行时位置文件
+
+**位置**：App 数据目录下，Windows 为 `%APPDATA%\com.tensorwriting.desktop\runtime-location.json`。开发版（debug 构建）写 `runtime-location.debug.json`，避免开发版把 CLI 指向开发用的运行时。
+
+**写入时机**：App 启动时（后台线程，不阻塞界面，也覆盖了运行时目录迁移）、安装或升级运行时成功后、删除运行时后。内容不变时不重写文件。
+
+**格式**（`schemaVersion` 1）：
+
+```json
+{
+  "schemaVersion": 1,
+  "layoutVersion": 1,
+  "appVersion": "0.1.9",
+  "executable": "C:\\Users\\<user>\\AppData\\Local\\TensorWriting\\tensorwriting.exe",
+  "root": "C:\\Users\\<user>\\AppData\\Local\\TensorWriting\\texlive",
+  "cache": "C:\\Users\\<user>\\AppData\\Local\\TensorWriting\\texlive\\online",
+  "status": "installed",
+  "runtimeDir": "C:\\...\\texlive\\installed\\205887230a2db771-staging-KY91VS",
+  "generation": "205887230a2db771-staging-KY91VS",
+  "version": "2026.2.1",
+  "variant": "minimal",
+  "snapshotId": "texlive2026-20260301",
+  "compatibility": "busytex-1.4.0-tl2026"
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `layoutVersion` | 运行时目录与在线缓存结构的版本。App 改变 `installed/`、`active.json`、`online/` 的结构时递增；CLI 遇到不认识的版本应报错，不猜测 |
+| `executable` | App 可执行文件路径，供 `status`、打开项目等功能使用 |
+| `root`、`cache` | 运行时存储根目录与在线资源缓存目录 |
+| `status` | `installed`、`missing`（未安装）或 `invalid`（`active.json` 校验失败）。只有 `installed` 时才有 `runtimeDir` 到 `snapshotId` 这些字段 |
+| `compatibility` | App 要求的运行时兼容标识，未安装时也给出 |
+
+**CLI 使用规则**：
+
+1. 只把它当"去哪里找"的指针。编译前仍读取 `<root>/active.json`，以其中的 generation 为准，并校验清单（App 可能在写指针前崩溃，或用户手动改过目录）。
+2. 文件不存在时（App 版本不高于 0.1.8），退回 W-07 中的默认目录。
+3. `schemaVersion` 或 `layoutVersion` 不认识时，报错并提示升级 CLI。
+
+**实现位置**：TensorWriting `src-tauri/src/runtime.rs`（`runtime_location`、`publish_runtime_location`、`write_location`，以及安装与删除流程中的调用），`src-tauri/src/lib.rs`（启动时调用）。单元测试覆盖已安装、未安装、校验失败三种状态，以及内容不变时不重写。
+
+### 8.2 T-02 编译共享包
+
+**目标**：引擎检测、编译选项检测、诊断解析、BusyTeX pipeline 改写只有一份代码，App 与 CLI 共用，规则不会分叉。CLI 编译出的诊断与 App 诊断面板一致。
+
+**抽取范围**：
+
+| 来源（TensorWriting `src/lib/`） | 抽取内容 | 依赖处理 |
+|---|---|---|
+| `compile.ts` | `detectEngine`、`detectCompileOptions`、`unsupportedFeatures`、`fileAtLines`、`parseDiagnostics`、`parseCompilationDiagnostics`、`directRuntimeResources`、`rewriteBusyTexWorkerBootstrap`；引擎到 BusyTeX driver 的映射（现为私有常量 `DRIVER`，改为导出） | `unsupportedFeatures` 有 3 处、`rewriteBusyTexWorkerBootstrap` 有 1 处调用 `t()`，见下文 i18n 解耦 |
+| `busytexModes.ts` | 整个文件：`rewriteBusyTexPipeline`、`executionSource`、`cacheSource` | 无依赖，直接迁移 |
+| `engineRequirements.ts` | 整个文件：`findEngineRequirements`、`checkEngineCompatibility`、`ENGINE_LABELS`、`EngineRequirement` | 1 处 `t()` |
+| `src/types.ts` | `LatexEngine`、`CompileFile`、`CompileDiagnostic`、`EngineCompatibility` | 迁入共享包，App 的 `types.ts` 改为从共享包重新导出，其余代码不用改 import |
+
+**不抽取**：`BusyTexCompiler`、`CompilerClient`、`useCompile`。它们依赖浏览器（Blob URL、替换全局 `Worker`、资源会话的 `fetch`）和 Tauri `invoke`，CLI 不需要。CLI 自己实现 Node 版宿主（`worker_threads`、浏览器接口模拟、资源服务）。`COMPILE_STOPPED` 是 App 停止编译的内部标记，留在 App。
+
+**i18n 解耦**：共享包不 import App 的 `i18n`。需要文案的函数增加可选参数 `translate?: (key: string, params?: Record<string, unknown>) => string`，默认原样返回 key。App 的翻译 key 本身就是中文原文，所以 App 传入 `t` 后行为完全不变；CLI 可以传入自己的翻译（G-06），不传则输出中文。
+
+**包的形式**：
+
+- 源码放在 TensorWriting 仓库 `packages/compile-core/`（npm workspaces）。规则跟着 App 和它固定的 BusyTeX 版本走，所以 App 仓库是唯一来源。
+- 纯 TypeScript、ESM，不依赖 DOM 或 Node API，可在浏览器和 Node 中直接 import。
+- 发布到 npm，包名暂定 `@tensorx/writing-compile-core`。导出 `COMPATIBILITY = "busytex-1.4.0-tl2026"`；CLI 编译前检查它与运行时的兼容标识一致（`rewriteBusyTexPipeline` 在 pipeline 格式不匹配时本来就会报错，这里提前给出明确提示）。
+- 版本规则：改变诊断格式或检测规则时升 minor 版本；兼容标识变化时升 major 版本。
+
+**实施步骤**：
+
+1. 建立 workspace 包，迁移上述函数与类型。原文件改为从共享包 import；需要改 import 的地方有 `compile.ts`、`useCompile.ts`、`App.tsx`、`DiagnosticsPanel.tsx`，以及测试 `tests/compile.test.mjs`、`tests/compileModes.test.mjs`、`tests/runtime.test.mjs`（`tests/benchDriver.ts` 只用 `BusyTexCompiler`，不受影响）。
+2. 按上文做 i18n 解耦，App 调用处传入 `t`。
+3. 把纯函数相关的单元测试迁入共享包，用 `node --test` 在 Node 中运行，证明包不依赖浏览器。
+4. 检查 Vite 和 `tsc` 能解析 workspace 包，确认 Tauri 构建不受影响。
+5. 发布第一个版本，CLI 依赖它。
+
+**验收**：
+
+- App 行为不变：`npm run check`、`test:compile`、`test:diagnostics` 通过，`bench:compile` 无性能回退。
+- 共享包可在纯 Node 中 import，测试通过。
+- CLI 使用同一组诊断用例，结果与 App 一致。
+
+**不在范围内**：项目扫描与主文件检测目前在 Rust 端（`lib.rs` 的 `scan_files`、`detect_main_file`），不属于这个包。CLI 先用 TS 重新实现，以后另立一项，用共享测试用例保证两边一致。
+
+许可证见第 9 节待决问题 1。
+
+## 9. 待决问题
+
+1. **编译共享包的许可证**：TensorWriting 是 AGPL-3.0，TensorCLI 是 MIT。共享包（T-02）采用什么许可证，需要在实施前确定。运行时中的 BusyTeX 文件由 CLI 在运行时从用户安装目录加载，不随 CLI 分发。
 2. **TeX 资源缓存是否与 App 共用**：共用（写入 App 运行时目录下的 `online\`）可避免重复下载和重复占用磁盘，但属于第 1 节"不写入应用存储目录"的例外；另一选项是只读 App 缓存、新下载另存，或下载到临时目录并在编译后删除。
 3. 运行时未安装时，CLI 是否负责下载安装运行时（可复用 App 的签名校验逻辑），还是只提示用户去 App 中安装。第一版倾向后者。
 4. TensorReading HTTP API 是否会有版本号或鉴权变化，CLI 如何做兼容检测。
