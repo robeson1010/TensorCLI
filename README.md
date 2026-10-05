@@ -2,68 +2,146 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A command-line interface and agent-facing tool layer for the **Tensor** software family: **TensorReading** (literature management and reading) and **TensorWriting** (academic writing).
+`tensorx` is the command line for **TensorReading** (literature management and reading) and **TensorWriting** (LaTeX writing). You, your scripts and AI agents (Claude Code, Codex, Copilot and others) can use it to import papers, generate outlines and the knowledge graph, and compile LaTeX projects to PDF.
 
-TensorCLI lets you, your scripts, and AI agents (Claude Code, Copilot, Codex, MCP clients, and others) search, read, import, and cite from the same local libraries the desktop apps use, without opening the GUI.
+This repository holds only the download links, the usage guide and an agent skill. `tensorx` is installed together with TensorReading; there is nothing else to install.
 
-> **Status: planning.** This repository currently contains the project requirements only. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) (in Chinese). No functionality is implemented yet.
+## Download
 
-## Goals
+| App | Download | Notes |
+|---|---|---|
+| TensorReading | <https://www.tensorx.xin> | Includes the `tensorx` command |
+| TensorWriting | <https://www.tensorx.xin/tensorwriting> | Needed for `tensorx writing` |
 
-- One command, `tensor`, with a subcommand per app: `tensor reading ...`, `tensor writing ...`.
-- Stable, scriptable output (`--json`) so that shell scripts and agents can parse results reliably.
-- First-class agent integration: an MCP server and a ready-to-use agent skill.
-- Safe by default: reads never modify the library; writes go through each app's official local API.
+After installing TensorReading and starting it once:
 
-## Planned usage
+- **Windows**: the install folder is added to your user PATH. Open a new terminal and run `tensorx`.
+- **macOS / Linux**: `~/.local/bin/tensorx` is created. If the shell cannot find it, add `~/.local/bin` to your PATH.
 
-The commands below are a design sketch and may change.
+Check the installation:
 
 ```bash
-# TensorReading
-tensor reading status                          # is the app running, where is the library
-tensor reading search "deep brain stimulation" --limit 10 --json
-tensor reading get <item_key> --fulltext       # metadata, PDF path, AI note
-tensor reading collections
-tensor reading import --doi 10.48550/arXiv.1706.03762 --collection "To read"
-tensor reading cite <item_key> --style apa
-
-# TensorWriting
-tensor writing status
-tensor writing list
-# further commands: to be defined once the TensorWriting interface is confirmed
-
-# Agent integration
-tensor mcp serve                               # MCP server over stdio
-tensor skill install --target claude           # install the agent skill
+tensorx --version
+tensorx status
 ```
 
-## How it works
+## Before you start
 
-TensorCLI talks to the Tensor apps through their local interfaces on your machine. Nothing is sent to a remote service.
+- The desktop apps do the work. If an app is not running, `tensorx` starts it (pass `--no-launch` to prevent that).
+- **The app must be signed in to a TensorX account**, otherwise the command is refused (exit code 7). Sign in inside the app, or run:
 
-| Interface | Used for | Availability |
-|---|---|---|
-| Local HTTP API (TensorReading: `127.0.0.1:23120`) | Metadata search, citations, all writes (imports) | App must be running |
-| Library storage folder (read-only SQLite and files) | Full-text PDFs, AI notes, richer queries | Always, even if the app is closed |
+```bash
+tensorx reading login
+tensorx writing login
+```
 
-## Roadmap
+- TensorWriting needs TeX Live installed (from its account menu).
 
-| Milestone | Scope |
+## TensorWriting: compile a LaTeX project
+
+```bash
+tensorx writing compile ./my-paper                 # compile a project folder
+tensorx writing compile ./my-paper/main.tex        # name the main file
+tensorx writing compile ./my-paper -o out/paper.pdf
+tensorx writing compile ./thesis --main chapters/main.tex --engine xelatex
+tensorx writing open ./my-paper                    # open in the app without compiling
+```
+
+`compile` switches the TensorWriting window to the project, picks the main file and engine by the app's own rules, builds it, and writes the PDF:
+
+- by default next to the main file with the same name (`main.tex` → `main.pdf`);
+- or wherever `-o` says. The path must end in `.pdf` and its folder must exist.
+
+| Option | Meaning |
 |---|---|
-| M0 | Repository, README, requirements (this commit) |
-| M1 | CLI skeleton, config, `tensor reading` read commands |
-| M2 | `tensor reading import`, duplicate check, PDF attach |
-| M3 | MCP server and agent skill |
-| M4 | `tensor writing` commands |
-| M5 | Packaging and releases (Windows first, then macOS and Linux) |
+| `--main <relative path>` | Main file; same as "Set as main file" in the app |
+| `--engine pdflatex\|xelatex\|lualatex` | Engine for this build only; the project setting is unchanged |
+| `--mode full\|quick` | Full (default) or quick compilation |
+| `-o, --output <file.pdf>` | Where to write the PDF |
+| `--log` | Also print the full compile log |
 
-Details and acceptance criteria are in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+A failed build lists its errors as `file:line: error: message` and exits with code 6. Missing packages are downloaded automatically; progress goes to stderr.
 
-## Contributing
+## TensorReading: papers, outlines and the knowledge graph
 
-Issues and discussions are welcome. Please read the requirements document before proposing new commands so that naming and output conventions stay consistent.
+```bash
+# Import (duplicate check, metadata lookup, open-access PDF download)
+tensorx reading import --doi 10.1038/s41586-021-03819-2
+tensorx reading import --arxiv 1706.03762 --collection "Transformers" --tag to-read
+tensorx reading import --pdf ./paper.pdf --outline      # local PDF, outline right away
+
+# Outline a paper and add it to the knowledge graph
+tensorx reading outline <item_key>
+tensorx reading outline <key1> <key2> --force           # regenerate existing outlines
+
+# Knowledge base (knowledge graph)
+tensorx reading kg build                                # extract papers not yet in the graph, rebuild it
+tensorx reading kg status
+
+# Look things up
+tensorx reading search "deep brain stimulation" --limit 10
+tensorx reading get <item_key>                          # metadata, PDF path, outline, KG summary
+tensorx reading collections
+```
+
+| Command | Meaning |
+|---|---|
+| `import` | Needs one of `--doi`, `--arxiv`, `--pdf` or `--title`. Optional `--collection <name>` (created if missing), `--tag <tag>` (repeatable), `--outline` (outline after import), `--no-download` (skip PDF download). Exits with 5 if the paper is already in the library |
+| `outline` | Runs the app's AI outline flow, saves the outline and adds the paper to the knowledge graph. The paper needs a PDF. Uses account points |
+| `kg build` | Extracts papers that have an outline but were never extracted, then rebuilds the global graph. `--no-extract` only rebuilds; `--model` picks the model |
+| `search` | Searches titles and abstracts; prints item_key, year, title, authors |
+| `get` | Everything about one paper |
+
+Get an `item_key` from the output of `search` or `import`.
+
+## Common options and output
+
+| Option | Meaning |
+|---|---|
+| `--json` | JSON output; errors too: `{"ok": false, "error": {"code", "message"}, "exitCode"}` |
+| `-q, --quiet` | No progress messages |
+| `--no-launch` | Fail instead of starting an app that is not running |
+| `--timeout <seconds>` | How long to wait for a job, default 1800 |
+
+Progress always goes to stderr, so stdout stays parseable with `--json`.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | General error |
+| 2 | Invalid arguments |
+| 3 | App or TeX runtime unavailable |
+| 4 | Not found (paper, project, main file, PDF) |
+| 5 | Imported paper already exists |
+| 6 | Compilation failed |
+| 7 | App not signed in |
+
+## AI agents
+
+[`skills/tensorx/SKILL.md`](skills/tensorx/SKILL.md) is an agent skill that tells an agent when and how to call `tensorx`. For Claude Code:
+
+```bash
+# macOS / Linux
+mkdir -p ~/.claude/skills/tensorx && cp skills/tensorx/SKILL.md ~/.claude/skills/tensorx/
+```
+
+```powershell
+# Windows PowerShell
+New-Item -ItemType Directory -Force "$HOME\.claude\skills\tensorx" | Out-Null
+Copy-Item skills\tensorx\SKILL.md "$HOME\.claude\skills\tensorx\"
+```
+
+Other agents that accept skills or custom instructions can use the file's contents as is.
+
+## Security and privacy
+
+- `tensorx` only talks to the apps on `127.0.0.1`. Each app start creates a fresh random token in the current user's app data folder; requests without it, and requests from a browser, are refused.
+- The only network traffic is what the apps already do: fetching paper metadata and PDFs, AI outline and knowledge-graph extraction, and downloading missing TeX packages.
+
+## Feedback
+
+Please open an issue in this repository.
 
 ## License
 
-[MIT](LICENSE)
+The documentation and skill in this repository are licensed under [MIT](LICENSE).
