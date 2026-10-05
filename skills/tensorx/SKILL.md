@@ -1,18 +1,18 @@
 ---
 name: tensorx
-description: Drive the user's TensorReading literature library and TensorWriting LaTeX editor through the `tensorx` command line. Use to compile a LaTeX project to PDF and read its errors, to import papers (DOI, arXiv, local PDF), generate a paper's outline, build or inspect the knowledge graph, or search and read papers in the user's library.
+description: Drive the user's TensorReading literature library and TensorWriting LaTeX editor through the `tensorx` command line. Use to compile a LaTeX project to PDF and read its errors, to import papers (DOI, arXiv, local PDF), build or inspect the knowledge base (outline and knowledge graph), or search and read papers in the user's library.
 ---
 
 # tensorx
 
-`tensorx` ships with TensorReading and talks to the two desktop apps on this machine. The apps do the work: compiling happens in TensorWriting, imports and AI outlines in TensorReading. If an app is not running, `tensorx` starts it and waits.
+`tensorx` ships with TensorReading and talks to the two desktop apps on this machine. The apps do the work: compiling happens in TensorWriting, imports and the knowledge base in TensorReading. If an app is not running, `tensorx` starts it and waits.
 
 ## Rules
 
 - Always pass `--json` and parse stdout. Progress lines go to stderr; ignore them.
 - Every JSON answer has `ok`. On failure: `{"ok": false, "error": {"code", "message"}, "exitCode"}`.
 - The app must be signed in to a TensorX account on a **Pro** (or Enterprise) membership. On `AUTH_REQUIRED` (exit 7), tell the user to sign in in the app (or run `tensorx reading login` / `tensorx writing login`, which opens the browser and waits). On `PRO_REQUIRED` (exit 8), tell the user tensorx needs a Pro membership. Do not retry in a loop.
-- `outline`, `import --outline` and `kg build` call paid AI services on the user's account. Run them only when the user asked for outlines or the knowledge graph.
+- `kg build` and `import --kg` call paid AI services on the user's account. Run them only when the user asked for the knowledge base (or outlines, which are part of it).
 - `import` adds to the user's library. Import only what the user asked for.
 - Never read or write the apps' data folders directly; go through `tensorx`.
 
@@ -51,23 +51,29 @@ tensorx reading collections --json
 tensorx reading import --doi <doi> --json
 tensorx reading import --arxiv <id> --json
 tensorx reading import --pdf <file.pdf> [--title "<title>"] --json
-#   optional: --collection "<name>" (created if missing) --tag <tag> (repeatable) --outline --no-download
+#   optional: --collection "<name>" (created if missing) --tag <tag> (repeatable) --kg --no-download
 ```
 
 - Result: `itemId`, `itemKey`, `title`, `status` (`created` | `duplicate`), `pdf`, `pdfSource`.
 - Exit code 5 with `status: "duplicate"`: the paper was already in the library; `itemKey` is the existing paper. Treat it as found, not as an error.
 - `pdf: null` means no open-access PDF was found; ask the user for a local file and use `--pdf`.
+- `--kg` also adds the paper to the knowledge base; the result then has `knowledge` (same shape as `kg build`).
 
-## Outline and knowledge graph
+## Knowledge base (outline + knowledge graph)
+
+The outline and the knowledge-graph extraction are one step; there is no separate outline command.
 
 ```bash
-tensorx reading outline <item_key> [<item_key> ...] [--force] --json
-tensorx reading kg build [--no-extract] [--model <model>] --json
+tensorx reading kg build <item_key> [<item_key> ...] [--force] --json   # these papers
+tensorx reading kg build --all [--force] --json                         # every paper not in the knowledge base yet
+tensorx reading kg build --no-extract --json                            # only rebuild the graph, no AI calls
 tensorx reading kg status --json
 ```
 
-- `outline` needs a PDF on the paper (error code `NO_PDF`, exit 4). It saves the outline and adds the paper to the knowledge graph. Result: `outline`, `kgSaved`, `kgError`, `skipped` (true when both already existed; `--force` regenerates).
-- `kg build` extracts papers that have an outline but were never extracted, then rebuilds the graph. Result: `papersWithOutline`, `upToDate`, `stale` (papers to extract), `extracted`, `failed[]`, `graph`. Exit 1 when some papers failed; the rest are saved.
+- For each paper: without an outline, the outline and extraction are generated together from its PDF; with an outline but no extraction, only the extraction runs. Papers already in the knowledge base are skipped unless `--force`.
+- Result: `papers[]` (`itemKey`, `title`, `status` = built | extracted | upToDate | noPdf | failed, `sections`, `error`), counts `built`, `extracted`, `upToDate`, `noPdf`, `failed`, and `graph`. Exit 1 when a paper failed (or a named paper has no PDF); the others are saved.
+- `--all` can mean many AI calls on a large library; confirm with the user first.
+- Read a paper's outline afterwards with `tensorx reading get <item_key>`.
 - `kg status`: `extractions` and `graph` (`papers`, `nodes`, `edges`, `clusters`, `model`, `builtAt`).
 
 ## Exit codes
@@ -84,4 +90,4 @@ tensorx reading kg status --json
 | 7 | Not signed in | Ask the user to sign in |
 | 8 | Account is not Pro | Tell the user tensorx needs a Pro membership |
 
-Long jobs (first compile with package downloads, outlines) can take minutes; the default wait is 30 minutes, change it with `--timeout <seconds>`.
+Long jobs (first compile with package downloads, knowledge-base builds) can take minutes; the default wait is 30 minutes, change it with `--timeout <seconds>`.
