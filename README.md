@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-`tensorx` is the command line for **TensorReading** (literature management and reading) and **TensorWriting** (LaTeX writing). You, your scripts, and any AI agent that can run terminal commands can use it to import papers, build the knowledge base (outlines and the knowledge graph), search the library, and compile LaTeX projects to PDF.
+`tensorx` is the command line for **TensorReading** (literature management and reading) and **TensorWriting** (LaTeX writing). You, your scripts, and any AI agent that can run terminal commands can use it to import papers, build the knowledge base (outlines and the knowledge graph), search the library and browse it by collection or tag, generate and edit papers' AI blogs, and compile LaTeX projects to PDF.
 
 This repository holds only the download links, the usage guide and the agent skill. `tensorx` is installed together with TensorReading; there is nothing else to install.
 
@@ -54,9 +54,15 @@ tensorx reading search "transformer" --limit 5        # search the library
 | `tensorx status` | Both apps: running, version, signed-in account, membership (never starts an app) |
 | `tensorx skill [-o <file>]` | Print or save the agent skill (needs no app and no sign-in) |
 | `tensorx reading status` \| `login` | TensorReading status and library location; sign in through the browser |
-| `tensorx reading search <query>` | Search titles and abstracts |
-| `tensorx reading get <item_key>` | One paper: metadata, PDF path, outline and knowledge-graph summary |
-| `tensorx reading collections` | The collection tree |
+| `tensorx reading search [<query>] [--collection …] [--tag …]` | Search titles and abstracts, or list a collection's or tag's papers |
+| `tensorx reading get <item_key>` | One paper: metadata, tags, PDF path, outline, knowledge-graph summary, AI blog status |
+| `tensorx reading collections` | The collection tree with each collection's paper count |
+| `tensorx reading tags` | Every tag with its paper count |
+| `tensorx reading tag add\|remove <item_key> <tag>…` | Add or remove a paper's tags |
+| `tensorx reading blog list` | Papers that have an AI blog, and whether it is published |
+| `tensorx reading blog <item_key>` | Print a paper's AI blog (Markdown) |
+| `tensorx reading blog generate <item_key>` | Have AI write the blog from the paper's PDF |
+| `tensorx reading blog write <item_key> <file.md>` | Replace the blog's text (from a file or stdin) |
 | `tensorx reading import …` | Import a paper |
 | `tensorx reading kg build …` | Build the knowledge base (outline and knowledge graph together) |
 | `tensorx reading kg status` | Size and build time of the knowledge graph |
@@ -132,14 +138,50 @@ The global knowledge graph is rebuilt at the end. Name the papers or pass `--all
 
 ```bash
 tensorx reading search "deep brain stimulation" --limit 10
+tensorx reading search --collection "LFP"                 # every paper in a collection
+tensorx reading search --tag "deep learning" --tag LFP    # every paper carrying both tags
+tensorx reading search "transformer" --collection "LLM"   # keywords within a collection
 tensorx reading get <item_key>
 tensorx reading collections
+tensorx reading tags
 ```
 
 - `search` looks in titles and abstracts and prints item_key, year, title, authors. With `--json` the items are CSL-JSON, ready for building references.
-- `get` returns metadata, authors, tags, collections, the PDF's absolute path, the outline, and a knowledge-graph summary (entity and relation counts, one-line summary).
+- Keyword searches show 20 results by default; with only `--collection` / `--tag` you get them all. `--limit N` changes it, `--limit 0` means no limit. When results are cut off, the output says how many there are in total.
+- `--collection` takes the collection's name (case-insensitive). If several collections share a name, the error lists their ids; pass the id instead. Papers in subcollections are not included.
+- Several `--tag`s mean the paper must carry all of them. Tag names ignore letter case.
+- `get` returns metadata, authors, tags, collections, the PDF's absolute path, the outline, a knowledge-graph summary (entity and relation counts, one-line summary), and the AI blog's status.
+- `collections` and `tags` show how many papers each has. Papers in the recycle bin are never counted or listed.
 
 Get an `item_key` from the output of `search` or `import`.
+
+### Tags
+
+```bash
+tensorx reading tag add <item_key> "to read" "deep learning"
+tensorx reading tag remove <item_key> "to read"
+```
+
+- `add` reuses an existing tag that differs only in letter case, instead of creating a near-duplicate.
+- `remove` exits with code 4 when the paper had none of the tags named.
+- The library view in the app refreshes by itself.
+
+### AI blog
+
+Each paper can have one AI blog: an article written from the paper, with figures cropped from the PDF. It is the same blog as the app's AI blog tool.
+
+```bash
+tensorx reading blog list                          # papers with a blog: published or not
+tensorx reading blog <item_key>                    # print it (Markdown with YAML frontmatter)
+tensorx reading blog generate <item_key>           # AI writes it from the paper's PDF
+tensorx reading blog generate <item_key> --force   # write it again, replacing the current one
+tensorx reading blog write <item_key> edited.md    # replace its text; `-` reads stdin
+```
+
+- **Publishing stays in the app.** `tensorx` never publishes to tensorx.xin; open the AI blog tool and click Publish. `blog list` and `get` show whether a blog is published and its address.
+- `generate` uses AI services and spends account points, takes a few minutes, and needs the paper's PDF. On a paper that already has a blog it stops with exit code 5 unless you pass `--force`.
+- `write` keeps the current frontmatter when the file has none, and always keeps the published post's id and address, so publishing again updates the same post. If the blog is open in the app, the editor reloads it.
+- A blog file with nothing after its frontmatter (left by opening a paper in the editor) counts as no blog.
 
 ## Common options and output
 
@@ -150,7 +192,7 @@ Get an `item_key` from the output of `search` or `import`.
 | `--no-launch` | Fail instead of starting an app that is not running |
 | `--timeout <seconds>` | How long to wait for a job, default 1800. The job keeps running in the app after a timeout |
 
-Progress always goes to stderr, so stdout stays parseable with `--json`. The [skill](skills/tensorx/SKILL.md) documents each command's JSON fields.
+Progress always goes to stderr, so stdout stays parseable with `--json`. In a terminal, long jobs (import, knowledge base, AI blog) show their steps like the app does: finished steps get a tick and their time, the current one updates in place, with a bar when its size is known. When stderr is not a terminal, only finished steps are printed, one line each. The [skill](skills/tensorx/SKILL.md) documents each command's JSON fields.
 
 | Exit code | Meaning |
 |---|---|
@@ -159,7 +201,7 @@ Progress always goes to stderr, so stdout stays parseable with `--json`. The [sk
 | 2 | Invalid arguments |
 | 3 | App or TeX runtime unavailable |
 | 4 | Not found (paper, project, main file, PDF) |
-| 5 | Imported paper already exists |
+| 5 | Already exists (an imported paper, or a blog `generate` would replace) |
 | 6 | Compilation failed |
 | 7 | App not signed in |
 | 8 | Account is not on a Pro membership |
@@ -188,6 +230,8 @@ Then just ask your agent, for example:
 - Compile ./my-paper with tensorx; fix any errors and compile again until it produces a PDF
 - Import arXiv 2404.03425 into TensorReading, put it in the "To read" collection, and add it to the knowledge base
 - Find papers on remote sensing foundation models in my TensorReading library and add citations to refs.bib
+- List every paper in my "LFP" collection that has no AI blog yet, and generate one for the three most recent
+- Read the AI blog of <item_key>, tighten the introduction and fix the figure captions, then save it back
 
 ## Troubleshooting
 
@@ -198,12 +242,13 @@ Then just ask your agent, for example:
 | Exit code 8 (not Pro) | `tensorx` is available to Pro and Enterprise members |
 | Exit code 3, TeX Live not installed | Install TeX Live from TensorWriting's account menu |
 | "No response after starting" the app | The app is too old for `tensorx`; update it |
+| A command fails with "HTTP 404" | The app is older than this `tensorx` command; update TensorReading |
 | Timeout | A first compile downloads packages and knowledge-base jobs take a while; raise `--timeout`, the job finishes in the app either way |
 
 ## Security and privacy
 
 - `tensorx` only talks to the apps on `127.0.0.1`. Each app start creates a fresh random token in the current user's app data folder; requests without it, and requests from a browser, are refused.
-- The only network traffic is what the apps already do: fetching paper metadata and PDFs, the knowledge base's AI extraction, downloading missing TeX packages, and checking the membership with TensorX.
+- The only network traffic is what the apps already do: fetching paper metadata and PDFs, the knowledge base's AI extraction, AI blog generation, downloading missing TeX packages, and checking the membership with TensorX. Publishing a blog happens only when you click Publish in the app.
 
 ## Feedback
 

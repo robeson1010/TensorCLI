@@ -1,6 +1,6 @@
 ---
 name: tensorx
-description: Drive the user's TensorReading literature library and TensorWriting LaTeX editor through the `tensorx` command line. Use to compile a LaTeX project to PDF and read its errors, to import papers (DOI, arXiv, local PDF), build or inspect the knowledge base (outline and knowledge graph), or search and read papers in the user's library.
+description: Drive the user's TensorReading literature library and TensorWriting LaTeX editor through the `tensorx` command line. Use to compile a LaTeX project to PDF and read its errors, to import papers (DOI, arXiv, local PDF), build or inspect the knowledge base (outline and knowledge graph), search and read papers in the user's library, list a collection's or tag's papers, add or remove tags, or generate, read and edit a paper's AI blog.
 ---
 
 # tensorx
@@ -12,7 +12,8 @@ description: Drive the user's TensorReading literature library and TensorWriting
 - Always pass `--json` and parse stdout. Progress lines go to stderr; ignore them.
 - Every JSON answer has `ok`. On failure: `{"ok": false, "error": {"code", "message"}, "exitCode"}`.
 - The app must be signed in to a TensorX account on a **Pro** (or Enterprise) membership. On `AUTH_REQUIRED` (exit 7), tell the user to sign in in the app (or run `tensorx reading login` / `tensorx writing login`, which opens the browser and waits). On `PRO_REQUIRED` (exit 8), tell the user tensorx needs a Pro membership. Do not retry in a loop.
-- `kg build` and `import --kg` call paid AI services on the user's account. Run them only when the user asked for the knowledge base (or outlines, which are part of it).
+- `kg build`, `import --kg` and `blog generate` call paid AI services on the user's account. Run them only when the user asked for the knowledge base (or outlines, which are part of it) or for the AI blog.
+- Publishing a blog to tensorx.xin is the user's click in the app. `tensorx` never publishes; after changing a published blog, remind the user to publish again.
 - `import` adds to the user's library. Import only what the user asked for.
 - Never read or write the apps' data folders directly; go through `tensorx`.
 
@@ -38,12 +39,38 @@ Edit-compile loop:
 
 ```bash
 tensorx reading search "<query>" --limit 10 --json      # items[]: CSL-JSON, id = item_key
-tensorx reading get <item_key> --json                   # item, creators, tags, collections, pdf, folder, outline, knowledge
-tensorx reading collections --json
+tensorx reading search --tag "<tag>" [--tag ...] --json  # every paper carrying all these tags
+tensorx reading search --collection "<name or id>" --json # every paper directly in that collection
+tensorx reading get <item_key> --json                   # item, creators, tags, collections, pdf, folder, outline, knowledge, blog
+tensorx reading collections --json                      # collections[]: id, name, parent_id, itemCount
+tensorx reading tags --json                             # tags[]: id, name, count
+tensorx reading tag add <item_key> "<tag>" [...] --json
+tensorx reading tag remove <item_key> "<tag>" [...] --json
 ```
 
 - `search` returns CSL-JSON (`id`, `title`, `author[]`, `issued`, `container-title`, `DOI`, …). Build BibTeX entries from it when adding citations to a LaTeX project.
 - `get` returns `pdf` (absolute path or null). Read the PDF from that path when you need the full text. `outline` is `{"sections":[{title, level, page, summary, children}]}` or null. `knowledge` summarizes the paper's knowledge-graph extraction (`entities`, `relations`, `oneLineSummary`, `keyFindings`) or is null.
+- `search` also returns `total` (matches before `--limit`). Keyword searches default to 20 results; with no keywords and a `--collection`/`--tag`, all matches are returned. `--limit 0` means no limit. Filters combine (keywords AND collection AND every tag). Recycle-bin papers never appear.
+- `--collection` takes a name (case-insensitive) or, when several collections share a name (error lists their ids), an id. Subcollections are not included. Unknown collection or tag exits 4.
+- Tag names match ignoring ASCII case. `search --tag` with a tag that does not exist exits 4. `itemCount` and tag `count` leave out the recycle bin.
+- `tag add|remove` result: `tags[]` (the paper's tags afterwards), `added[]`, `removed[]`, `missing[]` (names to remove the paper did not carry). `add` reuses an existing tag that differs only in case. `remove` exits 4 when nothing was removed. The app's library view refreshes by itself.
+
+## AI blog
+
+Each paper can have one AI blog: `blog_post.md` (YAML frontmatter + Markdown) in the paper folder, figures in `figs/` next to it. Publishing to tensorx.xin is done by the user in the app (the 发布 button); the CLI never publishes.
+
+```bash
+tensorx reading blog list --json                          # blogs[]: itemKey, paperTitle, title, published, postUrl, chars, figures, modifiedAt, path
+tensorx reading blog <item_key> --json                    # blog: the same fields + markdown
+tensorx reading blog generate <item_key> [--force] --json # AI writes it from the PDF (takes a few minutes)
+tensorx reading blog write <item_key> <file.md> --json    # replace it; `-` reads stdin
+```
+
+- `get` also returns `blog` (same fields, no markdown) or null. `published` is true once the app has published it (`postUrl` set).
+- A blog with nothing past its frontmatter counts as no blog: it is not listed, `get` gives `blog: null`, `blog <key>` exits 4, and `generate` writes it without `--force`.
+- `generate` calls a paid AI service on the user's account; run it only when the user asked for the blog. It exits 5 (`DUPLICATE`) when the paper already has a blog; add `--force` only after the user agrees to overwrite it. Exit 4 when the paper has no PDF. Result: `figures`, `failedFigures[]`, `equations`, `chars`, `replaced`, `published`, `postUrl`.
+- To edit: `blog <key> --json`, change `markdown`, save it to a file, `blog write <key> <file>`. Keep image references as `figs/<name>.png`; the frontmatter `cover` names one of those files. Text without frontmatter keeps the current frontmatter. `post_id`/`post_url` are always kept so the next publish updates the same post.
+- After changing a published blog, tell the user to publish again in the app; the site does not change until then.
 
 ## Import
 
@@ -74,7 +101,7 @@ tensorx reading kg status --json
 - Result: `papers[]` (`itemKey`, `title`, `status` = built | extracted | upToDate | noPdf | failed, `sections`, `error`), counts `built`, `extracted`, `upToDate`, `noPdf`, `failed`, and `graph`. Exit 1 when a paper failed (or a named paper has no PDF); the others are saved.
 - `--all` can mean many AI calls on a large library; confirm with the user first.
 - Read a paper's outline afterwards with `tensorx reading get <item_key>`.
-- `kg status`: `extractions` and `graph` (`papers`, `nodes`, `edges`, `clusters`, `model`, `builtAt`).
+- `kg status`: `extractions` and `graph` (`papers`, `nodes`, `edges`, `clusters`, `builtAt`).
 
 ## Exit codes
 
@@ -85,7 +112,7 @@ tensorx reading kg status --json
 | 2 | Bad arguments | Fix the command |
 | 3 | App or TeX runtime unavailable | Ask the user to install or start the app / install TeX Live in TensorWriting |
 | 4 | Not found (paper, project, main file, PDF) | Check the key or path |
-| 5 | Import duplicate | Use the returned `itemKey` |
+| 5 | Already exists (import duplicate, or `blog generate` on a paper that has a blog) | Import: use the returned `itemKey`. Blog: ask before `--force` |
 | 6 | Compile failed | Fix the sources from `diagnostics` |
 | 7 | Not signed in | Ask the user to sign in |
 | 8 | Account is not Pro | Tell the user tensorx needs a Pro membership |

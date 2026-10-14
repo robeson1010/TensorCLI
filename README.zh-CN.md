@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-`tensorx` 是 **TensorReading**（文献管理与阅读）和 **TensorWriting**（LaTeX 写作）的命令行。你、你的脚本，以及任何能运行终端命令的 AI Agent，都可以用它导入文献、生成知识库（大纲与知识图谱）、检索文献，以及编译 LaTeX 工程并拿到 PDF。
+`tensorx` 是 **TensorReading**（文献管理与阅读）和 **TensorWriting**（LaTeX 写作）的命令行。你、你的脚本，以及任何能运行终端命令的 AI Agent，都可以用它导入文献、生成知识库（大纲与知识图谱）、检索文献并按分类或标签浏览、生成和修改文献的 AI 博客，以及编译 LaTeX 工程并拿到 PDF。
 
 本仓库只提供下载地址、使用说明和 Agent Skill。`tensorx` 随 TensorReading 一起安装，不需要单独安装。
 
@@ -54,9 +54,15 @@ tensorx reading search "transformer" --limit 5        # 检索文献库
 | `tensorx status` | 两个应用的运行状态、版本、登录账号和会员等级（不会启动应用） |
 | `tensorx skill [-o <文件>]` | 输出或保存给 AI Agent 的 Skill 说明（不需要应用，也不需要登录） |
 | `tensorx reading status` \| `login` | TensorReading 的状态与文献库位置；在浏览器中登录 |
-| `tensorx reading search <关键词>` | 在标题和摘要中检索 |
-| `tensorx reading get <item_key>` | 一篇文献的元数据、PDF 路径、大纲与知识图谱摘要 |
-| `tensorx reading collections` | 分类（文件夹）树 |
+| `tensorx reading search [<关键词>] [--collection …] [--tag …]` | 在标题和摘要中检索，或列出某个分类、标签下的文献 |
+| `tensorx reading get <item_key>` | 一篇文献的元数据、标签、PDF 路径、大纲、知识图谱摘要与 AI 博客状态 |
+| `tensorx reading collections` | 分类（文件夹）树及每个分类的文献数 |
+| `tensorx reading tags` | 所有标签及每个标签的文献数 |
+| `tensorx reading tag add\|remove <item_key> <标签>…` | 给文献添加或移除标签 |
+| `tensorx reading blog list` | 已有 AI 博客的文献，以及是否已发布 |
+| `tensorx reading blog <item_key>` | 输出一篇文献的 AI 博客（Markdown） |
+| `tensorx reading blog generate <item_key>` | 让 AI 根据文献 PDF 生成博客 |
+| `tensorx reading blog write <item_key> <文件.md>` | 用文件或标准输入替换博客内容 |
 | `tensorx reading import …` | 导入文献 |
 | `tensorx reading kg build …` | 生成知识库（大纲与知识图谱一起生成） |
 | `tensorx reading kg status` | 知识图谱的规模与构建时间 |
@@ -132,14 +138,50 @@ tensorx reading kg status
 
 ```bash
 tensorx reading search "deep brain stimulation" --limit 10
+tensorx reading search --collection "LFP"                 # 某个分类下的全部文献
+tensorx reading search --tag "deep learning" --tag LFP    # 同时带有这两个标签的全部文献
+tensorx reading search "transformer" --collection "LLM"   # 在某个分类里按关键词检索
 tensorx reading get <item_key>
 tensorx reading collections
+tensorx reading tags
 ```
 
 - `search` 在标题和摘要中检索，返回 item_key、年份、标题、作者。`--json` 时为 CSL-JSON，可直接用于生成参考文献。
-- `get` 返回元数据、作者、标签、分类、PDF 绝对路径、大纲，以及知识图谱摘要（实体数、关系数、一句话总结）。
+- 关键词检索默认显示 20 条；只用 `--collection` / `--tag` 时返回全部。`--limit N` 可修改条数，`--limit 0` 表示不限。结果被截断时会提示总数。
+- `--collection` 接受分类名（不区分大小写）。有多个同名分类时会报错并列出它们的 id，改用 id 即可。子分类中的文献不包含在内。
+- 多个 `--tag` 表示文献要同时带有这些标签。标签名不区分大小写。
+- `get` 返回元数据、作者、标签、分类、PDF 绝对路径、大纲、知识图谱摘要（实体数、关系数、一句话总结），以及 AI 博客的状态。
+- `collections` 和 `tags` 会显示各自的文献数。回收站中的文献既不计数也不列出。
 
 `item_key` 可以从 `search` 或 `import` 的输出中得到。
+
+### 标签
+
+```bash
+tensorx reading tag add <item_key> "to read" "deep learning"
+tensorx reading tag remove <item_key> "to read"
+```
+
+- `add` 遇到只差大小写的已有标签时直接使用它，不会新建一个几乎重复的标签。
+- `remove` 时文献一个指定的标签都没有，退出码为 4。
+- 应用中的文献库列表会自动刷新。
+
+### AI 博客
+
+每篇文献可以有一篇 AI 博客：根据论文写成的文章，配有从 PDF 中截取的图表。它和应用里「AI 博客」工具中的是同一篇。
+
+```bash
+tensorx reading blog list                          # 已有博客的文献，及是否已发布
+tensorx reading blog <item_key>                    # 输出博客（带 YAML frontmatter 的 Markdown）
+tensorx reading blog generate <item_key>           # AI 根据文献 PDF 生成博客
+tensorx reading blog generate <item_key> --force   # 重新生成，覆盖现有博客
+tensorx reading blog write <item_key> edited.md    # 替换博客内容；`-` 表示从标准输入读取
+```
+
+- **发布仍在应用里完成。** `tensorx` 不会发布到 tensorx.xin；请在应用的 AI 博客工具中点击「发布」。`blog list` 和 `get` 会显示博客是否已发布以及它的网址。
+- `generate` 会调用 AI 服务、消耗账号积分，需要几分钟，文献必须有 PDF。文献已有博客时会停止并返回退出码 5，加 `--force` 才会覆盖。
+- `write` 写入的文件没有 frontmatter 时，保留现有的 frontmatter；已发布文章的 id 和网址总会保留，所以再次发布会更新同一篇文章。博客正在应用中打开时，编辑器会自动重新载入。
+- frontmatter 之后没有任何内容的博客文件（在编辑器里打开过文献就会留下）视为没有博客。
 
 ## 通用选项与输出
 
@@ -150,7 +192,7 @@ tensorx reading collections
 | `--no-launch` | 应用没有运行时直接失败，不自动启动 |
 | `--timeout <秒>` | 等待任务完成的上限，默认 1800。超时后任务仍会在应用中继续 |
 
-进度信息总是写到 stderr，所以 `--json` 的 stdout 可以直接解析。各命令 JSON 字段的说明见 [Skill](skills/tensorx/SKILL.md)。
+进度信息总是写到 stderr，所以 `--json` 的 stdout 可以直接解析。在终端里，长任务（导入、知识库、AI 博客）会像应用里一样按步骤显示：完成的步骤打勾并显示用时，当前步骤原地刷新，有总数的步骤显示进度条。stderr 不是终端时，只逐行列出完成的步骤。各命令 JSON 字段的说明见 [Skill](skills/tensorx/SKILL.md)。
 
 | 退出码 | 含义 |
 |---|---|
@@ -159,7 +201,7 @@ tensorx reading collections
 | 2 | 参数错误 |
 | 3 | 应用或 TeX 运行时不可用 |
 | 4 | 未找到（文献、工程、主文件、PDF） |
-| 5 | 导入的文献已存在 |
+| 5 | 已存在（导入的文献已在库中，或 `blog generate` 会覆盖已有博客） |
 | 6 | 编译失败 |
 | 7 | 应用未登录 |
 | 8 | 账号不是 Pro 会员 |
@@ -188,6 +230,8 @@ tensorx skill -o <Skill 目录>/tensorx/SKILL.md  # 保存到指定位置（自�
 - 用 tensorx 编译 ./my-paper，有错误就修好再编译，直到生成 PDF
 - 把 arXiv 2404.03425 导入 TensorReading，放进“待读”分类，并加入知识库
 - 在我的 TensorReading 文献库里找遥感基础模型相关的论文，把引用加到 refs.bib
+- 列出我「LFP」分类里还没有 AI 博客的文献，给最新的三篇生成博客
+- 读一下 <item_key> 的 AI 博客，精简引言、修正图注，然后保存回去
 
 ## 常见问题
 
@@ -198,12 +242,13 @@ tensorx skill -o <Skill 目录>/tensorx/SKILL.md  # 保存到指定位置（自�
 | 退出码 8（不是 Pro） | `tensorx` 仅对 Pro（专业版）及企业版会员开放 |
 | 退出码 3，提示 TeX Live 尚未安装 | 在 TensorWriting 的账户菜单中安装 TeX Live |
 | 提示应用“启动后没有响应” | 应用版本过旧，不支持 `tensorx`，请更新到最新版 |
+| 命令报错“HTTP 404” | 应用版本比这个 `tensorx` 命令旧，请更新 TensorReading |
 | 等待超时 | 首次编译需要下载宏包、知识库任务需要较长时间；用 `--timeout` 延长，任务会在应用中继续完成 |
 
 ## 安全与隐私
 
 - `tensorx` 只连接本机 `127.0.0.1` 上的应用。应用每次启动都会生成新的随机令牌，写在当前用户的应用数据目录中；没有令牌的请求和来自浏览器的请求都会被拒绝。
-- 联网的只有应用原有的功能：获取文献元数据和 PDF、知识库的 AI 抽取、下载缺失的 TeX 宏包，以及向 TensorX 确认会员等级。
+- 联网的只有应用原有的功能：获取文献元数据和 PDF、知识库的 AI 抽取、AI 博客生成、下载缺失的 TeX 宏包，以及向 TensorX 确认会员等级。博客只有在你于应用中点击「发布」时才会发布。
 
 ## 问题反馈
 
